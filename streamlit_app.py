@@ -130,7 +130,7 @@ def main():
         # User selects symbol and timeframe
         symbol = st.selectbox("Select Symbol", options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT'], index=0)
         timeframe = st.selectbox("Select Timeframe", options=['5m', '15m'], index=0)
-        exchange_id = st.text_input("Exchange ID", value='binance')
+        exchange_id = st.text_input("Exchange ID", value='kucoin')
         
         # Initialize session state for analysis flag
         if 'run_analysis' not in st.session_state:
