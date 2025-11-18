@@ -2,6 +2,7 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
+import time
 
 # --- CONFIGURATION (Default Values) ---
 LOOKBACK_BARS = 200     
@@ -11,6 +12,7 @@ RSI_PERIOD = 14
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0]
 DEFAULT_EXCHANGE = 'kucoin'
+CORE_PAIRS = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT', 'BNB/USDT']
 # ----------------------------------------
 
 # --- HELPER FUNCTIONS ---
@@ -19,36 +21,49 @@ DEFAULT_EXCHANGE = 'kucoin'
 def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
     """
     Fetches all active USDT markets, sorts them by 24h trading volume,
-    and returns the top 200 pairs.
+    and returns the top 200 pairs with core pairs prepended.
     """
     try:
         exchange = getattr(ccxt, exchange_id)()
-        
-        # 1. Fetch all market tickers (includes 24h volume)
         tickers = exchange.fetch_tickers()
         
         volume_ranked_pairs = []
+        core_pairs_found = set()
 
         for symbol, ticker in tickers.items():
-            # 2. Filter for USDT-quoted pairs that are active and have valid volume data
+            # Filter for USDT-quoted pairs that are active and have valid volume data
             if 'USDT' in symbol and ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
-                volume_ranked_pairs.append({
+                pair_data = {
                     'symbol': symbol,
                     'volume': ticker['baseVolume']
-                })
+                }
+                
+                # Check if it's one of the core pairs
+                if symbol in CORE_PAIRS:
+                    core_pairs_found.add(symbol)
+                
+                volume_ranked_pairs.append(pair_data)
         
-        # 3. Sort the pairs by volume in descending order
+        # 1. Sort the pairs by volume in descending order
         volume_ranked_pairs.sort(key=lambda x: x['volume'], reverse=True)
         
-        # 4. Extract the symbols and take the top 200
-        top_symbols = [item['symbol'] for item in volume_ranked_pairs[:200]]
+        # 2. Extract the symbols and take the top 200, ensuring no duplicates with core pairs
+        top_symbols = [item['symbol'] for item in volume_ranked_pairs]
         
-        return top_symbols
+        # 3. Prepend CORE_PAIRS and filter out duplicates from the volume list
+        final_list = CORE_PAIRS.copy()
+        
+        # Add volume-ranked pairs only if they are NOT already in the core list
+        for symbol in top_symbols:
+            if symbol not in final_list:
+                final_list.append(symbol)
+        
+        # Trim the final list to the desired size (e.g., CORE_PAIRS size + 195 volume-ranked pairs)
+        return final_list[:200]
         
     except Exception as e:
-        # Fallback list if the API fails
         print(f"Error fetching symbols: {e}")
-        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+        return CORE_PAIRS # Fallback to core pairs on failure
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds
 def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
@@ -165,14 +180,27 @@ def main():
         st.header("Configuration")
         
         # --- DYNAMIC SYMBOL LIST FETCH ---
-        # NOTE: Using the DEFAULT_EXCHANGE ('kucoin') for the symbol list fetch
         symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
-        default_index = symbol_list.index('BTC/USDT') if 'BTC/USDT' in symbol_list else 0
+        # 1. TEXT INPUT FILTER (Allows typing to filter the list)
+        search_term = st.text_input("Search Ticker:", placeholder="Type BTC, ETH, etc...").upper()
+        
+        # Filter the list based on search term
+        if search_term:
+            filtered_symbols = [s for s in symbol_list if search_term in s]
+            if not filtered_symbols:
+                st.warning(f"No symbols found matching '{search_term}'.")
+                filtered_symbols = symbol_list # Use full list as fallback
+        else:
+            filtered_symbols = symbol_list
+        
+        # 2. SELECTBOX (The Selection)
+        # Find default index for BTC/USDT or the first item in the filtered list
+        default_index = filtered_symbols.index('BTC/USDT') if 'BTC/USDT' in filtered_symbols else 0
         
         symbol = st.selectbox(
-            "Select Symbol", 
-            options=symbol_list, 
+            "Select Symbol (Filtered List)", 
+            options=filtered_symbols, 
             index=default_index
         )
         # --- END DYNAMIC SYMBOL LIST ---
@@ -217,7 +245,6 @@ def main():
             
             # --- Display All Fibonacci Levels ---
             st.subheader("All Calculated Fibonacci Levels") 
-            
             
             # Convert Fib levels to a DataFrame for clean display
             fib_data = {
