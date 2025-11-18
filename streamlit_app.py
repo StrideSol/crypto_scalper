@@ -12,7 +12,18 @@ RSI_PERIOD = 14
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0]
 DEFAULT_EXCHANGE = 'kucoin'
-CORE_PAIRS = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT', 'BNB/USDT']
+
+# YOUR PROVIDED LIST (CLEANED AND PRIORITIZED)
+# This list ensures these tokens appear first and are easily searchable.
+PRIORITY_COINS = [
+    'BTC', 'ETH', 'DOGE','XRP', 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
+    'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ICP', 'APT', 'HBAR', 
+    'NEAR', 'FET', 'RNDR', 'IMX', 'ARB', 'OP', 'ALGO', 'SAND', 'MANA', 'GALA', 
+    'AXS', 'CHZ', 'APE', 'LDO', 'CRV', 'UNI', 'AAVE', 'MKR', 'ZEC', 'BCH', 
+    'XMR', 'LTC', 'HBAR', 'WLD', 'ZRX', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ',
+    'BAT', 'IOST', 'RVN', 'GTC', 'CVC', 'OMG', 'KCS', 'ICP', 'CC' , 'ALLO'  
+    # Note: BTC, ETH, etc. are listed first for top priority
+]
 # ----------------------------------------
 
 # --- HELPER FUNCTIONS ---
@@ -20,54 +31,51 @@ CORE_PAIRS = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'SOL/USDT', 'BNB/USDT']
 @st.cache_data(ttl=43200) # Cache the list for 12 hours
 def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
     """
-    Fetches all active USDT markets, sorts them by 24h trading volume,
-    and returns the top 200 pairs with core pairs prepended.
+    Fetches available markets on KuCoin, prioritizes the provided list, 
+    and then ranks the rest by 24h volume.
     """
     try:
         exchange = getattr(ccxt, exchange_id)()
+        markets = exchange.load_markets()
         tickers = exchange.fetch_tickers()
         
+        guaranteed_pairs = []
         volume_ranked_pairs = []
-        core_pairs_found = set()
-
-        for symbol, ticker in tickers.items():
-            # Filter for USDT-quoted pairs that are active and have valid volume data
-            if 'USDT' in symbol and ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
-                pair_data = {
-                    'symbol': symbol,
-                    'volume': ticker['baseVolume']
-                }
-                
-                # Check if it's one of the core pairs
-                if symbol in CORE_PAIRS:
-                    core_pairs_found.add(symbol)
-                
-                volume_ranked_pairs.append(pair_data)
         
-        # 1. Sort the pairs by volume in descending order
+        # 1. Build the list of guaranteed top pairs
+        for symbol in PRIORITY_COINS:
+            pair = f'{symbol}/USDT'
+            if pair in markets and markets[pair]['active']:
+                if pair not in guaranteed_pairs:
+                    guaranteed_pairs.append(pair)
+        
+        # 2. Fetch all tickers for volume ranking (excluding already guaranteed ones)
+        for symbol, ticker in tickers.items():
+            # Check if it's an active USDT market not already in our guaranteed list
+            if 'USDT' in symbol and symbol not in guaranteed_pairs:
+                if ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
+                    volume_ranked_pairs.append({
+                        'symbol': symbol,
+                        'volume': ticker['baseVolume']
+                    })
+        
+        # 3. Sort the rest by volume
         volume_ranked_pairs.sort(key=lambda x: x['volume'], reverse=True)
         
-        # 2. Extract the symbols and take the top 200, ensuring no duplicates with core pairs
+        # 4. Combine and return the final list
         top_symbols = [item['symbol'] for item in volume_ranked_pairs]
+        final_list = guaranteed_pairs + top_symbols
         
-        # 3. Prepend CORE_PAIRS and filter out duplicates from the volume list
-        final_list = CORE_PAIRS.copy()
-        
-        # Add volume-ranked pairs only if they are NOT already in the core list
-        for symbol in top_symbols:
-            if symbol not in final_list:
-                final_list.append(symbol)
-        
-        # Trim the final list to the desired size (e.g., CORE_PAIRS size + 195 volume-ranked pairs)
         return final_list[:200]
         
     except Exception as e:
         print(f"Error fetching symbols: {e}")
-        return CORE_PAIRS # Fallback to core pairs on failure
+        # Fallback to the top 5 of the priority list on failure
+        return [f'{s}/USDT' for s in PRIORITY_COINS[:5]] 
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds
 def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
-    """Fetches historical OHLCV data from the specified exchange."""
+    # ... (function body remains the same) ...
     try:
         exchange = getattr(ccxt, exchange_id)()
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -81,7 +89,7 @@ def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
         return pd.DataFrame()
 
 def calculate_indicators(df):
-    """Calculates EMA and RSI and adds them to the DataFrame."""
+    # ... (function body remains the same) ...
     df['EMA_Fast'] = df['close'].ewm(span=MA_FAST, adjust=False).mean()
     df['EMA_Slow'] = df['close'].ewm(span=MA_SLOW, adjust=False).mean()
     
@@ -94,13 +102,13 @@ def calculate_indicators(df):
     return df
 
 def find_swing_points(df, lookback_window=50):
-    """Identifies recent Swing High and Swing Low points."""
+    # ... (function body remains the same) ...
     swing_high = df['high'].iloc[-lookback_window:].max()
     swing_low = df['low'].iloc[-lookback_window:].min()
     return swing_high, swing_low
 
 def calculate_fib_levels(high, low):
-    """Calculates all Fibonacci Retracement and Extension price levels."""
+    # ... (function body remains the same) ...
     diff = high - low
     levels = {}
 
@@ -118,8 +126,7 @@ def calculate_fib_levels(high, low):
     return levels
 
 def generate_recommendation(df, symbol, timeframe):
-    """Generates the trade setup based on MA Crossover + RSI strategy and Fib levels."""
-    
+    # ... (function body remains the same) ...
     df = calculate_indicators(df)
     last = df.iloc[-1]
     second_last = df.iloc[-2]
@@ -183,7 +190,7 @@ def main():
         symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
         # 1. TEXT INPUT FILTER (Allows typing to filter the list)
-        search_term = st.text_input("Search Ticker:", placeholder="Type BTC, ETH, etc...").upper()
+        search_term = st.text_input("Search Ticker:", placeholder="Type BTC, FIL, etc...").upper()
         
         # Filter the list based on search term
         if search_term:
@@ -212,7 +219,7 @@ def main():
             st.session_state['run_analysis'] = True
             
         st.markdown(f"###### Last Analysis Run: {pd.Timestamp.now().strftime('%H:%M:%S')}")
-        st.warning("Data is cached for 60 seconds. Click 'Generate' to refresh.")
+        st.warning("Data is cached for 60 seconds. Click 'Generate' to refresh.')")
 
     # --- Main Analysis Logic ---
     if st.session_state.get('run_analysis'):
@@ -245,7 +252,7 @@ def main():
             
             # --- Display All Fibonacci Levels ---
             st.subheader("All Calculated Fibonacci Levels") 
-            
+                        
             # Convert Fib levels to a DataFrame for clean display
             fib_data = {
                 level: f"${price:,.2f}" 
