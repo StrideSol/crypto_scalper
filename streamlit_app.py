@@ -2,7 +2,6 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
-import time
 
 # --- CONFIGURATION (Default Values) ---
 LOOKBACK_BARS = 200     
@@ -32,7 +31,6 @@ def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
 
         for symbol, ticker in tickers.items():
             # 2. Filter for USDT-quoted pairs that are active and have valid volume data
-            # Check for baseVolume (volume in base asset)
             if 'USDT' in symbol and ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
                 volume_ranked_pairs.append({
                     'symbol': symbol,
@@ -167,6 +165,7 @@ def main():
         st.header("Configuration")
         
         # --- DYNAMIC SYMBOL LIST FETCH ---
+        # NOTE: Using the DEFAULT_EXCHANGE ('kucoin') for the symbol list fetch
         symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
         default_index = symbol_list.index('BTC/USDT') if 'BTC/USDT' in symbol_list else 0
@@ -218,9 +217,7 @@ def main():
             
             # --- Display All Fibonacci Levels ---
             st.subheader("All Calculated Fibonacci Levels") 
-
-[Image of Fibonacci retracement levels on a chart]
-
+            
             
             # Convert Fib levels to a DataFrame for clean display
             fib_data = {
@@ -232,7 +229,7 @@ def main():
             st.dataframe(fib_df, use_container_width=True)
 
         else:
-            st.error("Could not fetch data. Please check the Symbol and Exchange ID. Ensure the exchange is available on CCXT.")
+            st.error(f"Could not fetch data for {symbol}. Check connection or try another exchange/symbol.")
 
 if __name__ == "__main__":
     main()
