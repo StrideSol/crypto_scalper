@@ -2,8 +2,7 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
-import requests
-from bs4 import BeautifulSoup
+import requests # New: Used for the KuCoin API call
 import time
 
 # --- CONFIGURATION (Default Values) ---
@@ -14,11 +13,10 @@ RSI_PERIOD = 14
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0]
 DEFAULT_EXCHANGE = 'kucoin'
-GAINERS_URL = "https://www.kucoin.com/markets/rankings/gainers"
 
 # List of top global coins to prioritize (ensures these are always at the top)
 PRIORITY_COINS = [
-    'BTC', 'ETH', 'DOGE', 'XRP', 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
+    'BTC', 'ETH', 'DOGE', 'XRP', 'BNB, 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
     'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ZEC', 'BCH', 
     'XMR', 'WLD', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ', 'BAT', 'IOST', 'RVN', 
     'GTC', 'CVC', 'OMG', 'KCS', 'ICP',  'APT', 'NEAR', 'FET', 'RNDR', 
@@ -27,65 +25,50 @@ PRIORITY_COINS = [
 ]
 # ----------------------------------------
 
-# --- NEW FUNCTION: FETCH TOP GAINERS (Scrapes up to 20 rows) ---
+# --- NEW/FIXED FUNCTION: GET TOP GAINERS VIA API ---
 
-@st.cache_data(ttl=300) # Cache for 5 minutes
-def get_top_gainers(url):
-    """
-    Fetches and parses the top 20 gainers list from KuCoin's ranking page.
-    Uses generic table selectors for better resilience.
-    """
-    # Static Fallback Data (must match the structure expected by the styling code)
-    FALLBACK_DATA = pd.DataFrame({
-        'Rank': [1, 2, 3, 4, 5],
-        'Symbol': ['BTC', 'ETH', 'SOL', 'LTC', 'XRP'],
-        '24h Change': ['+5.00%', '+4.50%', '+3.50%', '+3.00%', '+2.50%']
-    })
-    
+@st.cache_data(ttl=300) # Cache the result for 5 minutes
+def get_top_gainers():
+    """Fetches the top 20 gainers using KuCoin's public API."""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        url = "https://api.kucoin.com/api/v1/market/allTickers"
+        response = requests.get(url, timeout=10)
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        if response.status_code != 200:
+            raise Exception(f"KuCoin API request failed with status code: {response.status_code}")
         
-        # ***FIXED SELECTOR: Target the main table body rows***
-        # This targets the rows within the general ranking table.
-        rows = soup.select('.rankings-table tbody tr') 
-        
-        gainers_data = []
-        for i, row in enumerate(rows[:20]): # Iterate up to 20 rows
-            cols = row.find_all('td')
-            if len(cols) >= 3:
-                # Name (Symbol) is often embedded in the first column
-                # Look for the symbol text within a common tag like a div or span
-                symbol_element = cols[0].find('div')
-                
-                # The change percentage is typically in the 3rd or 4th column
-                change_element = cols[2] if len(cols) > 2 else None
-                
-                symbol = symbol_element.text.strip().split('/')[0] if symbol_element and '/' in symbol_element.text else symbol_element.text.strip() if symbol_element else f'UNKNOWN_{i}'
-                change = change_element.text.strip() if change_element else 'N/A'
-                
-                gainers_data.append({
-                    'Rank': i + 1,
-                    'Symbol': symbol.replace('/USDT', ''), # Clean up the symbol
-                    '24h Change': change # Column name MUST be exactly '24h Change'
-                })
-        
-        if not gainers_data:
-             st.warning("Scraper failed to extract rows based on new selector. Falling back.")
-             return FALLBACK_DATA
+        data = response.json()
+        tickers = data['data']['ticker']  # List of dicts with symbol, last price, changeRate
 
-        return pd.DataFrame(gainers_data)
+        # Filter for USDT pairs and create DataFrame
+        usdt_tickers = [t for t in tickers if t['symbol'].endswith('-USDT') and t['changeRate'] is not None]
+        df = pd.DataFrame(usdt_tickers)
+        
+        # Data Cleaning and Type Conversion
+        df['Ticker'] = df['symbol'].str.split('-').str[0] # Extract base ticker (e.g., BTC from BTC-USDT)
+        df['change_rate'] = pd.to_numeric(df['changeRate'], errors='coerce') * 100 # Convert 0.05 to 5.0%
+        df['last_price'] = pd.to_numeric(df['last'], errors='coerce') # Current price
+        
+        # Filter gainers (positive change) and sort descending
+        gainers = df[df['change_rate'] > 0].sort_values('change_rate', ascending=False).head(20)
+        
+        # Format for display
+        gainers['24h Change %'] = gainers['change_rate'].apply(lambda x: f"+{x:.2f}%")
+        gainers['Price (USDT)'] = gainers['last_price'].apply(lambda x: f"${x:,.4f}" if x > 0.01 else f"${x:,.8f}")
+        
+        return gainers[['Ticker', 'Price (USDT)', '24h Change %']].reset_index(drop=True).reset_index(names=['Rank'])
 
     except Exception as e:
-        # If request or parsing fails entirely
-        st.error(f"Failed to scrape gainers page: {e}. Using static fallback data.")
-        return FALLBACK_DATA
-        
+        print(f"API Error fetching gainers: {e}")
+        st.error("Failed to fetch Top Gainers via KuCoin API. Displaying static fallback data.")
+        # Static Fallback Data
+        return pd.DataFrame({
+            'Rank': [1, 2, 3, 4, 5],
+            'Ticker': ['BTC', 'ETH', 'SOL', 'LTC', 'XRP'],
+            'Price (USDT)': ['$65,000.00', '$4,500.00', '$150.00', '$100.00', '$0.50'],
+            '24h Change %': ['+5.00%', '+4.50%', '+3.50%', '+3.00%', '+2.50%']
+        })
+
 # --- EXISTING HELPER FUNCTIONS ---
 
 @st.cache_data(ttl=43200) # Cache the list for 12 hours
@@ -241,14 +224,18 @@ def main():
     # --- TOP GAINERS DASHBOARD SECTION ---
     st.header("🔥 Market Momentum: Top Gainers (KuCoin)")
     
-    gainers_df = get_top_gainers(GAINERS_URL)
+    # Get the gainers using the new reliable API function
+    gainers_df = get_top_gainers()
     
     # Apply conditional formatting for gainers (green for positive change)
     def color_change(val):
-        color = 'green' if '+' in str(val) else 'black'
-        return f'color: {color}'
+        # We only care about coloring the Change % column
+        if isinstance(val, str) and '+' in val:
+            return 'color: green'
+        return ''
 
-    styled_gainers = gainers_df.style.applymap(color_change, subset=['24h Change'])
+    # The styling must be applied to the string column '24h Change %'
+    styled_gainers = gainers_df.style.applymap(color_change, subset=['24h Change %'])
     
     st.dataframe(styled_gainers, hide_index=True, use_container_width=True)
     st.markdown("---")
