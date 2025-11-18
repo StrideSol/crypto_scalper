@@ -2,7 +2,6 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
-import time # Still needed for datetime/timestamp functions
 
 # --- CONFIGURATION (Default Values) ---
 LOOKBACK_BARS = 200     
@@ -11,11 +10,34 @@ MA_SLOW = 20
 RSI_PERIOD = 14
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0]
+DEFAULT_EXCHANGE = 'kucoin'
 # ----------------------------------------
 
-# --- HELPER FUNCTIONS (UNCHANGED from worker script) ---
+# --- HELPER FUNCTIONS ---
 
-@st.cache_data(ttl=60) # Cache data for 60 seconds to prevent unnecessary API calls
+@st.cache_data(ttl=43200) # Cache the list for 12 hours
+def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
+    """Fetches and returns the list of up to 200 active USDT trading pairs."""
+    try:
+        exchange = getattr(ccxt, exchange_id)()
+        markets = exchange.load_markets()
+        
+        # Filter for all USDT-quoted pairs that are active
+        usdt_pairs = [
+            symbol for symbol, market in markets.items() 
+            if market['quote'] == 'USDT' and market['active']
+        ]
+        
+        # Sort and return the top 200 pairs
+        usdt_pairs.sort()
+        return usdt_pairs[:200]
+        
+    except Exception as e:
+        # Fallback list if the API fails
+        st.error(f"❌ Could not fetch symbol list from {exchange_id}: {e}. Using fallback symbols.")
+        return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
+
+@st.cache_data(ttl=60) # Cache data for 60 seconds
 def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
     """Fetches historical OHLCV data from the specified exchange."""
     try:
@@ -28,7 +50,7 @@ def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
         
         return df
     except Exception as e:
-        # st.error(f"❌ Error fetching data: {e}") # Use st.error in Streamlit app
+        # Returning an empty DataFrame on failure
         return pd.DataFrame()
 
 def calculate_indicators(df):
@@ -89,7 +111,7 @@ def generate_recommendation(df, symbol, timeframe):
         entry = fib_levels['FIB_RET_38'] 
         tp1 = fib_levels['FIB_EXT_1_272']
         sl = fib_levels['FIB_RET_61']
-        reason = f"Bullish Crossover (9EMA > 20EMA) with strong RSI ({last['RSI']:.2f}). Entering on expected pullback to 38.2%."
+        reason = f"Bullish Crossover (9EMA > 20EMA) with strong RSI ({last['RSI']:.2f})."
     
     # --- SHORT (SELL) SIGNAL CHECK ---
     short_cross = (second_last['EMA_Fast'] > second_last['EMA_Slow']) and (last['EMA_Fast'] < last['EMA_Slow'])
@@ -100,7 +122,7 @@ def generate_recommendation(df, symbol, timeframe):
         entry = fib_levels['FIB_RET_61'] 
         tp1 = low - (high - low) * 0.272
         sl = fib_levels['FIB_RET_38']
-        reason = f"Bearish Crossover (9EMA < 20EMA) with weak RSI ({last['RSI']:.2f}). Entering on expected rally to 61.8%."
+        reason = f"Bearish Crossover (9EMA < 20EMA) with weak RSI ({last['RSI']:.2f})."
 
     # --- COMPILE RECOMMENDATION ---
     return {
@@ -108,7 +130,7 @@ def generate_recommendation(df, symbol, timeframe):
         "Timeframe": timeframe,
         "Current_Price": f"${last['close']:,.2f}",
         "Signal": signal,
-        "Entry_Level": entry, # Keep as float for table
+        "Entry_Level": entry,
         "Take_Profit_1": tp1,
         "Stop_Loss": sl,
         "Strategy_Reason": reason,
@@ -123,20 +145,30 @@ def main():
     st.title("📈 Fibonacci Scalping Advisor")
     st.markdown("---")
     
+    # Initialize session state for analysis flag
+    if 'run_analysis' not in st.session_state:
+        st.session_state['run_analysis'] = False
+        
     # --- Sidebar for User Input ---
     with st.sidebar:
         st.header("Configuration")
         
-        # User selects symbol and timeframe
-        symbol = st.selectbox("Select Symbol", options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT'], index=0)
-        timeframe = st.selectbox("Select Timeframe", options=['5m', '15m'], index=0)
-        exchange_id = st.text_input("Exchange ID", value='kucoin')
+        # --- DYNAMIC SYMBOL LIST FETCH ---
+        symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
-        # Initialize session state for analysis flag
-        if 'run_analysis' not in st.session_state:
-            st.session_state['run_analysis'] = False
-            
-        # This button triggers the script to run
+        # Set default index for BTC/USDT if available
+        default_index = symbol_list.index('BTC/USDT') if 'BTC/USDT' in symbol_list else 0
+        
+        symbol = st.selectbox(
+            "Select Symbol", 
+            options=symbol_list, 
+            index=default_index
+        )
+        # --- END DYNAMIC SYMBOL LIST ---
+        
+        timeframe = st.selectbox("Select Timeframe", options=['5m', '15m'], index=0)
+        exchange_id = st.text_input("Exchange ID", value=DEFAULT_EXCHANGE) 
+        
         if st.button("Generate Trade Setup"):
             st.session_state['run_analysis'] = True
             
@@ -148,6 +180,7 @@ def main():
         st.subheader(f"Current Setup for **{symbol} ({timeframe})**")
         
         with st.spinner('Fetching and analyzing data...'):
+            # Pass user inputs to the fetch function
             df = fetch_ohlcv_data(symbol, timeframe, LOOKBACK_BARS, exchange_id)
 
         if not df.empty:
@@ -161,7 +194,6 @@ def main():
             else:
                 st.info(f"**SIGNAL: {setup['Signal']}**")
                 
-            # Display key metrics
             st.metric(label="Current Price", value=setup['Current_Price'])
             
             # Display the key trade parameters in columns
@@ -186,7 +218,7 @@ def main():
             st.dataframe(fib_df, use_container_width=True)
 
         else:
-            st.error("Could not fetch data. Please check the Symbol and Exchange ID.")
+            st.error("Could not fetch data. Please check the Symbol and Exchange ID. Ensure the exchange is available on CCXT.")
 
 if __name__ == "__main__":
     main()
