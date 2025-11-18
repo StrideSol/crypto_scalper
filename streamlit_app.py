@@ -2,6 +2,7 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
+import time
 
 # --- CONFIGURATION (Default Values) ---
 LOOKBACK_BARS = 200     
@@ -17,24 +18,38 @@ DEFAULT_EXCHANGE = 'kucoin'
 
 @st.cache_data(ttl=43200) # Cache the list for 12 hours
 def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
-    """Fetches and returns the list of up to 200 active USDT trading pairs."""
+    """
+    Fetches all active USDT markets, sorts them by 24h trading volume,
+    and returns the top 200 pairs.
+    """
     try:
         exchange = getattr(ccxt, exchange_id)()
-        markets = exchange.load_markets()
         
-        # Filter for all USDT-quoted pairs that are active
-        usdt_pairs = [
-            symbol for symbol, market in markets.items() 
-            if market['quote'] == 'USDT' and market['active']
-        ]
+        # 1. Fetch all market tickers (includes 24h volume)
+        tickers = exchange.fetch_tickers()
         
-        # Sort and return the top 200 pairs
-        usdt_pairs.sort()
-        return usdt_pairs[:200]
+        volume_ranked_pairs = []
+
+        for symbol, ticker in tickers.items():
+            # 2. Filter for USDT-quoted pairs that are active and have valid volume data
+            # Check for baseVolume (volume in base asset)
+            if 'USDT' in symbol and ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
+                volume_ranked_pairs.append({
+                    'symbol': symbol,
+                    'volume': ticker['baseVolume']
+                })
+        
+        # 3. Sort the pairs by volume in descending order
+        volume_ranked_pairs.sort(key=lambda x: x['volume'], reverse=True)
+        
+        # 4. Extract the symbols and take the top 200
+        top_symbols = [item['symbol'] for item in volume_ranked_pairs[:200]]
+        
+        return top_symbols
         
     except Exception as e:
         # Fallback list if the API fails
-        st.error(f"❌ Could not fetch symbol list from {exchange_id}: {e}. Using fallback symbols.")
+        print(f"Error fetching symbols: {e}")
         return ['BTC/USDT', 'ETH/USDT', 'SOL/USDT']
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds
@@ -50,7 +65,6 @@ def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
         
         return df
     except Exception as e:
-        # Returning an empty DataFrame on failure
         return pd.DataFrame()
 
 def calculate_indicators(df):
@@ -145,7 +159,6 @@ def main():
     st.title("📈 Fibonacci Scalping Advisor")
     st.markdown("---")
     
-    # Initialize session state for analysis flag
     if 'run_analysis' not in st.session_state:
         st.session_state['run_analysis'] = False
         
@@ -156,7 +169,6 @@ def main():
         # --- DYNAMIC SYMBOL LIST FETCH ---
         symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
-        # Set default index for BTC/USDT if available
         default_index = symbol_list.index('BTC/USDT') if 'BTC/USDT' in symbol_list else 0
         
         symbol = st.selectbox(
@@ -180,7 +192,6 @@ def main():
         st.subheader(f"Current Setup for **{symbol} ({timeframe})**")
         
         with st.spinner('Fetching and analyzing data...'):
-            # Pass user inputs to the fetch function
             df = fetch_ohlcv_data(symbol, timeframe, LOOKBACK_BARS, exchange_id)
 
         if not df.empty:
@@ -206,7 +217,10 @@ def main():
             st.markdown(f"**Strategy Reason:** *{setup['Strategy_Reason']}*")
             
             # --- Display All Fibonacci Levels ---
-            st.subheader("All Calculated Fibonacci Levels")
+            st.subheader("All Calculated Fibonacci Levels") 
+
+[Image of Fibonacci retracement levels on a chart]
+
             
             # Convert Fib levels to a DataFrame for clean display
             fib_data = {
