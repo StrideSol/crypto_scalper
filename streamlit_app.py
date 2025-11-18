@@ -32,6 +32,14 @@ PRIORITY_COINS = [
 @st.cache_data(ttl=300) # Cache for 5 minutes
 def get_top_gainers(url):
     """Fetches and parses the top 20 gainers list from KuCoin's ranking page."""
+    
+    # Static Fallback Data (must match the structure expected by the styling code)
+    FALLBACK_DATA = pd.DataFrame({
+        'Rank': [1, 2, 3, 4, 5],
+        'Symbol': ['BTC', 'ETH', 'SOL', 'LTC', 'XRP'],
+        '24h Change': ['+5.00%', '+4.50%', '+3.50%', '+3.00%', '+2.50%']
+    })
+    
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -42,14 +50,12 @@ def get_top_gainers(url):
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Target the rows in the main table body
-        # Attempts to get the first 20 rows of the gainer data table.
         rows = soup.select('.coin-list-table tbody tr') 
         
         gainers_data = []
-        for i, row in enumerate(rows[:20]): # ***ITERATES UP TO 20 ROWS***
+        for i, row in enumerate(rows[:20]): # Iterate up to 20 rows
             cols = row.find_all('td')
             if len(cols) >= 3:
-                # Scrape Symbol and Change Percentage
                 name_element = cols[0].find('div', class_='symbol-name')
                 change_element = cols[2].find('span')
                 
@@ -59,22 +65,21 @@ def get_top_gainers(url):
                 gainers_data.append({
                     'Rank': i + 1,
                     'Symbol': symbol,
-                    '24h Change': change
+                    '24h Change': change # Column name MUST be exactly '24h Change'
                 })
         
+        # If successfully scraped but no rows found (e.g., website changed layout slightly)
         if not gainers_data:
-             st.warning("Scraper could not find the table structure. Displaying static fallback data.")
+             st.warning("Scraper failed to extract rows. Using static fallback data.")
+             return FALLBACK_DATA
 
         return pd.DataFrame(gainers_data)
 
     except Exception as e:
-        # Fallback data if scraping fails entirely
-        return pd.DataFrame({
-            'Rank': [1, 2, 3, 4, 5],
-            'Symbol': ['MORE', 'ROOT', 'CROSS', 'MOZ', 'SLAY'],
-            '24h Change': ['+274.07%', '+153.80%', '+51.37%', '+43.00%', '+32.89%']
-        })
-
+        # If request or parsing fails entirely
+        st.error(f"Failed to scrape gainers page: {e}. Using static fallback data.")
+        return FALLBACK_DATA
+        
 # --- EXISTING HELPER FUNCTIONS ---
 
 @st.cache_data(ttl=43200) # Cache the list for 12 hours
