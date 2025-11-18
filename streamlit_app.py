@@ -20,7 +20,7 @@ CHART_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d', '1w'] # Timeframes for the ta
 
 # List of top global coins to prioritize
 PRIORITY_COINS = [
-    'BTC', 'ETH', 'DOGE', 'XRP', 'BNB','USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
+    'BTC', 'ETH', 'DOGE', 'XRP', 'BNB','USDC', 'ADA', 'SOON','AVAX', 'SHIB', 'DOT', 'LINK', 
     'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ZEC', 'BCH', 
     'XMR', 'WLD', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ', 'BAT', 'IOST', 'RVN', 
     'GTC', 'CVC', 'OMG', 'KCS', 'ICP',  'APT', 'NEAR', 'FET', 'RNDR', 
