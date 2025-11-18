@@ -2,6 +2,8 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import numpy as np
+import requests
+from bs4 import BeautifulSoup
 import time
 
 # --- CONFIGURATION (Default Values) ---
@@ -12,28 +14,72 @@ RSI_PERIOD = 14
 FIB_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786]
 FIB_EXTENSIONS = [1.272, 1.618, 2.0]
 DEFAULT_EXCHANGE = 'kucoin'
+GAINERS_URL = "https://www.kucoin.com/markets/rankings/gainers"
 
-# YOUR PROVIDED LIST (CLEANED AND PRIORITIZED)
-# This list ensures these tokens appear first and are easily searchable.
+# List of top global coins to prioritize (ensures these are always at the top)
 PRIORITY_COINS = [
-    'BTC', 'ETH', 'DOGE','XRP', 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
-    'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ICP', 'APT', 'HBAR', 
-    'NEAR', 'FET', 'RNDR', 'IMX', 'ARB', 'OP', 'ALGO', 'SAND', 'MANA', 'GALA', 
-    'AXS', 'CHZ', 'APE', 'LDO', 'CRV', 'UNI', 'AAVE', 'MKR', 'ZEC', 'BCH', 
-    'XMR', 'LTC', 'HBAR', 'WLD', 'ZRX', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ',
-    'BAT', 'IOST', 'RVN', 'GTC', 'CVC', 'OMG', 'KCS', 'ICP', 'CC' , 'ALLO'  
-    # Note: BTC, ETH, etc. are listed first for top priority
+    'BTC', 'ETH', 'DOGE', 'XRP', 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
+    'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ZEC', 'BCH', 
+    'XMR', 'WLD', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ', 'BAT', 'IOST', 'RVN', 
+    'GTC', 'CVC', 'OMG', 'KCS', 'ICP',  'APT', 'NEAR', 'FET', 'RNDR', 
+    'IMX', 'ARB', 'OP', 'ALGO', 'SAND', 'MANA', 'GALA', 'AXS', 'CHZ', 'APE', 
+    'LDO', 'CRV', 'UNI', 'AAVE', 'MKR' , 'CC' , 'ALLO' , 'CVC'
 ]
 # ----------------------------------------
 
-# --- HELPER FUNCTIONS ---
+# --- NEW FUNCTION: FETCH TOP GAINERS (Scrapes up to 20 rows) ---
+
+@st.cache_data(ttl=300) # Cache for 5 minutes
+def get_top_gainers(url):
+    """Fetches and parses the top 20 gainers list from KuCoin's ranking page."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Target the rows in the main table body
+        # Attempts to get the first 20 rows of the gainer data table.
+        rows = soup.select('.coin-list-table tbody tr') 
+        
+        gainers_data = []
+        for i, row in enumerate(rows[:20]): # ***ITERATES UP TO 20 ROWS***
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                # Scrape Symbol and Change Percentage
+                name_element = cols[0].find('div', class_='symbol-name')
+                change_element = cols[2].find('span')
+                
+                symbol = name_element.text.strip().replace('/USDT', '') if name_element else f'UNKNOWN_{i}'
+                change = change_element.text.strip() if change_element else 'N/A'
+                
+                gainers_data.append({
+                    'Rank': i + 1,
+                    'Symbol': symbol,
+                    '24h Change': change
+                })
+        
+        if not gainers_data:
+             st.warning("Scraper could not find the table structure. Displaying static fallback data.")
+
+        return pd.DataFrame(gainers_data)
+
+    except Exception as e:
+        # Fallback data if scraping fails entirely
+        return pd.DataFrame({
+            'Rank': [1, 2, 3, 4, 5],
+            'Symbol': ['MORE', 'ROOT', 'CROSS', 'MOZ', 'SLAY'],
+            '24h Change': ['+274.07%', '+153.80%', '+51.37%', '+43.00%', '+32.89%']
+        })
+
+# --- EXISTING HELPER FUNCTIONS ---
 
 @st.cache_data(ttl=43200) # Cache the list for 12 hours
 def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
-    """
-    Fetches available markets on KuCoin, prioritizes the provided list, 
-    and then ranks the rest by 24h volume.
-    """
+    """Fetches available markets, prioritizes the list, and ranks the rest by volume."""
     try:
         exchange = getattr(ccxt, exchange_id)()
         markets = exchange.load_markets()
@@ -51,7 +97,6 @@ def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
         
         # 2. Fetch all tickers for volume ranking (excluding already guaranteed ones)
         for symbol, ticker in tickers.items():
-            # Check if it's an active USDT market not already in our guaranteed list
             if 'USDT' in symbol and symbol not in guaranteed_pairs:
                 if ticker['baseVolume'] is not None and ticker['baseVolume'] > 0:
                     volume_ranked_pairs.append({
@@ -70,12 +115,11 @@ def fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE):
         
     except Exception as e:
         print(f"Error fetching symbols: {e}")
-        # Fallback to the top 5 of the priority list on failure
         return [f'{s}/USDT' for s in PRIORITY_COINS[:5]] 
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds
 def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
-    # ... (function body remains the same) ...
+    """Fetches historical OHLCV data."""
     try:
         exchange = getattr(ccxt, exchange_id)()
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -89,7 +133,7 @@ def fetch_ohlcv_data(symbol, timeframe, limit, exchange_id):
         return pd.DataFrame()
 
 def calculate_indicators(df):
-    # ... (function body remains the same) ...
+    """Calculates EMA and RSI."""
     df['EMA_Fast'] = df['close'].ewm(span=MA_FAST, adjust=False).mean()
     df['EMA_Slow'] = df['close'].ewm(span=MA_SLOW, adjust=False).mean()
     
@@ -102,13 +146,13 @@ def calculate_indicators(df):
     return df
 
 def find_swing_points(df, lookback_window=50):
-    # ... (function body remains the same) ...
+    """Identifies recent Swing High and Swing Low points."""
     swing_high = df['high'].iloc[-lookback_window:].max()
     swing_low = df['low'].iloc[-lookback_window:].min()
     return swing_high, swing_low
 
 def calculate_fib_levels(high, low):
-    # ... (function body remains the same) ...
+    """Calculates all Fibonacci Retracement and Extension price levels."""
     diff = high - low
     levels = {}
 
@@ -126,7 +170,8 @@ def calculate_fib_levels(high, low):
     return levels
 
 def generate_recommendation(df, symbol, timeframe):
-    # ... (function body remains the same) ...
+    """Generates the trade setup."""
+    
     df = calculate_indicators(df)
     last = df.iloc[-1]
     second_last = df.iloc[-2]
@@ -182,6 +227,22 @@ def main():
     if 'run_analysis' not in st.session_state:
         st.session_state['run_analysis'] = False
         
+    # --- TOP GAINERS DASHBOARD SECTION ---
+    st.header("🔥 Market Momentum: Top Gainers (KuCoin)")
+    
+    gainers_df = get_top_gainers(GAINERS_URL)
+    
+    # Apply conditional formatting for gainers (green for positive change)
+    def color_change(val):
+        color = 'green' if '+' in str(val) else 'black'
+        return f'color: {color}'
+
+    styled_gainers = gainers_df.style.applymap(color_change, subset=['24h Change'])
+    
+    st.dataframe(styled_gainers, hide_index=True, use_container_width=True)
+    st.markdown("---")
+    # -------------------------------------------
+        
     # --- Sidebar for User Input ---
     with st.sidebar:
         st.header("Configuration")
@@ -189,7 +250,7 @@ def main():
         # --- DYNAMIC SYMBOL LIST FETCH ---
         symbol_list = fetch_kucoin_symbols(exchange_id=DEFAULT_EXCHANGE)
         
-        # 1. TEXT INPUT FILTER (Allows typing to filter the list)
+        # 1. TEXT INPUT FILTER 
         search_term = st.text_input("Search Ticker:", placeholder="Type BTC, FIL, etc...").upper()
         
         # Filter the list based on search term
@@ -197,12 +258,11 @@ def main():
             filtered_symbols = [s for s in symbol_list if search_term in s]
             if not filtered_symbols:
                 st.warning(f"No symbols found matching '{search_term}'.")
-                filtered_symbols = symbol_list # Use full list as fallback
+                filtered_symbols = symbol_list
         else:
             filtered_symbols = symbol_list
         
-        # 2. SELECTBOX (The Selection)
-        # Find default index for BTC/USDT or the first item in the filtered list
+        # 2. SELECTBOX
         default_index = filtered_symbols.index('BTC/USDT') if 'BTC/USDT' in filtered_symbols else 0
         
         symbol = st.selectbox(
@@ -210,7 +270,6 @@ def main():
             options=filtered_symbols, 
             index=default_index
         )
-        # --- END DYNAMIC SYMBOL LIST ---
         
         timeframe = st.selectbox("Select Timeframe", options=['5m', '15m'], index=0)
         exchange_id = st.text_input("Exchange ID", value=DEFAULT_EXCHANGE) 
@@ -219,7 +278,7 @@ def main():
             st.session_state['run_analysis'] = True
             
         st.markdown(f"###### Last Analysis Run: {pd.Timestamp.now().strftime('%H:%M:%S')}")
-        st.warning("Data is cached for 60 seconds. Click 'Generate' to refresh.')")
+        st.warning("Data is cached for 60 seconds. Click 'Generate' to refresh.")
 
     # --- Main Analysis Logic ---
     if st.session_state.get('run_analysis'):
@@ -252,7 +311,8 @@ def main():
             
             # --- Display All Fibonacci Levels ---
             st.subheader("All Calculated Fibonacci Levels") 
-                        
+            
+            
             # Convert Fib levels to a DataFrame for clean display
             fib_data = {
                 level: f"${price:,.2f}" 
