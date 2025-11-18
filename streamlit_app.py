@@ -16,7 +16,7 @@ DEFAULT_EXCHANGE = 'kucoin'
 
 # List of top global coins to prioritize (ensures these are always at the top)
 PRIORITY_COINS = [
-    'BTC', 'ETH', 'DOGE', 'XRP', 'BNB, 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
+    'BTC', 'ETH', 'DOGE', 'XRP', 'BNB', 'USDC', 'ADA', 'AVAX', 'SHIB', 'DOT', 'LINK', 
     'MATIC', 'LTC', 'TRX', 'ATOM', 'XLM', 'FIL', 'ETC', 'ZEC', 'BCH', 
     'XMR', 'WLD', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ', 'BAT', 'IOST', 'RVN', 
     'GTC', 'CVC', 'OMG', 'KCS', 'ICP',  'APT', 'NEAR', 'FET', 'RNDR', 
