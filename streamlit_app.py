@@ -31,8 +31,10 @@ PRIORITY_COINS = [
 
 @st.cache_data(ttl=300) # Cache for 5 minutes
 def get_top_gainers(url):
-    """Fetches and parses the top 20 gainers list from KuCoin's ranking page."""
-    
+    """
+    Fetches and parses the top 20 gainers list from KuCoin's ranking page.
+    Uses generic table selectors for better resilience.
+    """
     # Static Fallback Data (must match the structure expected by the styling code)
     FALLBACK_DATA = pd.DataFrame({
         'Rank': [1, 2, 3, 4, 5],
@@ -49,28 +51,32 @@ def get_top_gainers(url):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Target the rows in the main table body
-        rows = soup.select('.coin-list-table tbody tr') 
+        # ***FIXED SELECTOR: Target the main table body rows***
+        # This targets the rows within the general ranking table.
+        rows = soup.select('.rankings-table tbody tr') 
         
         gainers_data = []
         for i, row in enumerate(rows[:20]): # Iterate up to 20 rows
             cols = row.find_all('td')
             if len(cols) >= 3:
-                name_element = cols[0].find('div', class_='symbol-name')
-                change_element = cols[2].find('span')
+                # Name (Symbol) is often embedded in the first column
+                # Look for the symbol text within a common tag like a div or span
+                symbol_element = cols[0].find('div')
                 
-                symbol = name_element.text.strip().replace('/USDT', '') if name_element else f'UNKNOWN_{i}'
+                # The change percentage is typically in the 3rd or 4th column
+                change_element = cols[2] if len(cols) > 2 else None
+                
+                symbol = symbol_element.text.strip().split('/')[0] if symbol_element and '/' in symbol_element.text else symbol_element.text.strip() if symbol_element else f'UNKNOWN_{i}'
                 change = change_element.text.strip() if change_element else 'N/A'
                 
                 gainers_data.append({
                     'Rank': i + 1,
-                    'Symbol': symbol,
+                    'Symbol': symbol.replace('/USDT', ''), # Clean up the symbol
                     '24h Change': change # Column name MUST be exactly '24h Change'
                 })
         
-        # If successfully scraped but no rows found (e.g., website changed layout slightly)
         if not gainers_data:
-             st.warning("Scraper failed to extract rows. Using static fallback data.")
+             st.warning("Scraper failed to extract rows based on new selector. Falling back.")
              return FALLBACK_DATA
 
         return pd.DataFrame(gainers_data)
