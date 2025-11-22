@@ -25,7 +25,7 @@ PRIORITY_COINS = [
     'XMR', 'WLD', 'GMT', 'PAXG', 'DASH', 'FLOW', 'ENJ', 'BAT', 'IOST', 'RVN', 
     'GTC', 'CVC', 'OMG', 'KCS', 'ICP',  'APT', 'NEAR', 'FET', 'RNDR', 
     'IMX', 'ARB', 'OP', 'ALGO', 'SAND', 'MANA', 'GALA', 'AXS', 'CHZ', 'APE', 
-    'LDO', 'CRV', 'UNI', 'AAVE', 'MKR' , 'CC' , 'ALLO' , 'TNSR' , 'NIL' , 'WLFI'
+    'LDO', 'CRV', 'UNI', 'AAVE', 'MKR' , 'CC' , 'ALLO' , 'TNSR' , 'NIL' , 'WLFI' , 'COAI'
 ]
 # ----------------------------------------
 
